@@ -6,6 +6,11 @@ inputs:
     description: 'Python version to use'
     required: false
     default: '3.10'
+  check-metal-toolchain:
+    description: 'Verify Metal toolchain is available'
+    required: false
+    default: true
+    type: boolean
 
 runs:
   using: "composite"
@@ -15,8 +20,13 @@ runs:
       run: /opt/homebrew/bin/brew install openmpi
     
     - name: Verify MetalToolchain installed
+      if: ${{ inputs.check-metal-toolchain }}
       shell: bash
-      run: xcodebuild -showComponent MetalToolchain
+      run: |
+        if ! xcrun --sdk macosx --find metal >/dev/null 2>&1; then
+          echo "Metal toolchain not found (xcrun metal missing)."
+          exit 1
+        fi
 
     - uses: conda-incubator/setup-miniconda@v3
       with:

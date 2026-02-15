@@ -76,6 +76,23 @@ jobs:
       - uses: ./.github/actions/setup-macos
       - uses: ./.github/actions/build-macos
 
+  mac_cpu_build_and_test:
+    name: macOS (cpu, ${{ matrix.macos-version }})
+    needs: check_lint
+    strategy:
+      fail-fast: false
+      matrix:
+        macos-version: ["14", "15", "26"]
+    runs-on: macos-${{ matrix.macos-version }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-macos
+        with:
+          check-metal-toolchain: false
+      - uses: ./.github/actions/build-macos
+        with:
+          cpu-only: true
+
   windows_build_and_test:
     name: Windows (cpu, x86_64)
     needs: check_lint

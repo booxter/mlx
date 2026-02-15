@@ -3,6 +3,7 @@
 #include <cassert>
 #include <functional>
 #include <limits>
+#include <type_traits>
 
 #include "mlx/backend/common/reduce.h"
 #include "mlx/backend/cpu/encoder.h"
@@ -417,6 +418,18 @@ void reduce_dispatch_sum_prod(
     Reduce::ReduceType rtype,
     const std::vector<int>& axes) {
   if (rtype == Reduce::Sum) {
+    if constexpr (std::is_same_v<InT, bfloat16_t>) {
+      // Accumulate in float32 for better accuracy, then cast back to bfloat16.
+      auto tmp_buffer = allocator::malloc(out.size() * sizeof(float));
+      array tmp(tmp_buffer, out.shape(), float32);
+      reduction_op<InT, float, SumReduce>(in, tmp, axes, 0.0f);
+      auto tmp_ptr = tmp.data<float>();
+      auto out_ptr = out.data<InT>();
+      for (size_t i = 0; i < out.size(); i++) {
+        out_ptr[i] = static_cast<InT>(tmp_ptr[i]);
+      }
+      return;
+    }
     if constexpr (std::is_integral_v<InT> && sizeof(InT) <= 4) {
       reduction_op<InT, int32_t, SumReduce>(in, out, axes, 0);
     } else {

@@ -1,15 +1,27 @@
 name: 'Build and Test on macOS'
 description: 'Build and test MLX on macOS'
 
+inputs:
+  cpu-only:
+    description: 'Build CPU-only (disable Metal) and skip GPU/JIT tests'
+    type: boolean
+    required: false
+    default: false
+
 runs:
   using: "composite"
   steps:
     - name: Install dependencies
       env:
         DEBUG: 1
-        CMAKE_ARGS: "-DCMAKE_COMPILE_WARNING_AS_ERROR=ON"
+        CPU_ONLY: ${{ inputs.cpu-only }}
       shell: bash -l {0}
       run: |
+        if [ "${CPU_ONLY}" = "true" ]; then
+          export CMAKE_ARGS="-DMLX_BUILD_METAL=OFF -DCMAKE_COMPILE_WARNING_AS_ERROR=ON"
+        else
+          export CMAKE_ARGS="-DCMAKE_COMPILE_WARNING_AS_ERROR=ON"
+        fi
         pip install --upgrade pip
         pip install cmake setuptools typing_extensions
         pip install -e . -v
@@ -19,34 +31,61 @@ runs:
       run: |
         pip install numpy torch tensorflow
 
-    - name: Run Python tests
+    - name: Run Python tests (cpu)
       shell: bash -l {0}
       env:
         LOW_MEMORY: 1
       run: |
         DEVICE=cpu python -m unittest discover -v python/tests
+
+    - name: Run Python tests (gpu + distributed)
+      if: ${{ !inputs.cpu-only }}
+      shell: bash -l {0}
+      env:
+        LOW_MEMORY: 1
+      run: |
         DEVICE=gpu METAL_DEVICE_WRAPPER_TYPE=1 METAL_DEBUG_ERROR_MODE=0 python -m unittest discover -v python/tests
         mpirun --bind-to none -host localhost:8 -np 8 -x DYLD_LIBRARY_PATH=/opt/homebrew/lib/ python python/tests/mpi_test_distributed.py
         mlx.launch --verbose -n 8 python/tests/ring_test_distributed.py -v 2> >(tee -a stderr.log >&2)
         if $(grep "\[WARN\]" stderr.log); then echo "Distributed ring test failed"; exit 1; fi
     
     - name: Build example extension
+      env:
+        CPU_ONLY: ${{ inputs.cpu-only }}
       shell: bash -l {0}
       run: |
         cd examples/extensions
         pip install -r requirements.txt
         python setup.py build_ext --inplace
-        python test.py
+        if [ "${CPU_ONLY}" = "true" ]; then
+          echo "CPU-only build: skipping GPU extension test."
+        else
+          python test.py
+        fi
     
     - name: Build CPP only
+      env:
+        CPU_ONLY: ${{ inputs.cpu-only }}
       shell: bash -l {0}
       run: |
         mkdir -p build
         cd build
-        cmake ..
+        if [ "${CPU_ONLY}" = "true" ]; then
+          cmake .. -DMLX_BUILD_METAL=OFF
+        else
+          cmake ..
+        fi
         make -j $(sysctl -n hw.ncpu)
     
-    - name: Run CPP tests
+    - name: Run CPP tests (cpu)
+      if: ${{ inputs.cpu-only }}
+      shell: bash -l {0}
+      env:
+        DEVICE: cpu
+      run: ./build/tests/tests
+
+    - name: Run CPP tests (gpu)
+      if: ${{ !inputs.cpu-only }}
       shell: bash -l {0}
       env:
         DEVICE: gpu
@@ -55,6 +94,7 @@ runs:
       run: ./build/tests/tests
     
     - name: Build small binary with JIT
+      if: ${{ !inputs.cpu-only }}
       shell: bash -l {0}
       run: |
         mkdir -p build
@@ -62,12 +102,13 @@ runs:
         cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel \
           -DBUILD_SHARED_LIBS=ON \
           -DMLX_BUILD_CPU=OFF \
-          -DMLX_BUILD_SAFETENSORS=OFF \
-          -DMLX_BUILD_GGUF=OFF \
-          -DMLX_METAL_JIT=ON
+        -DMLX_BUILD_SAFETENSORS=OFF \
+        -DMLX_BUILD_GGUF=OFF \
+        -DMLX_METAL_JIT=ON
         make -j $(sysctl -n hw.ncpu)
     
     - name: Run Python tests with JIT
+      if: ${{ !inputs.cpu-only }}
       shell: bash -l {0}
       env:
         LOW_MEMORY: 1
