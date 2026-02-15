@@ -76,6 +76,19 @@ jobs:
       - uses: ./.github/actions/setup-macos
       - uses: ./.github/actions/build-macos
 
+  mac_cpu_build_and_test:
+    name: macOS (cpu)
+    needs: check_lint
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-macos
+        with:
+          check-metal-toolchain: false
+      - uses: ./.github/actions/build-macos
+        with:
+          cpu-only: true
+
   windows_build_and_test:
     name: Windows (cpu, x86_64)
     needs: check_lint
